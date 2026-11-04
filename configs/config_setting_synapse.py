@@ -1,3 +1,7 @@
+# ========== VM-UNet 初学者中文注释：仅增加说明，不修改执行逻辑 ==========
+# 文件说明：Synapse 配置：9 类=背景+8器官，224×224；代码 T_max=100，论文 T_max=50，存在冲突，不能擅自更改。
+# 建议按“输入→张量形状→操作→输出→评价/损失”顺序阅读；发现的原始问题见 docs/REPRODUCTION_ISSUES_ZH.md。
+# ====================================================================
 from pickle import FALSE
 from torchvision import transforms
 from datasets.dataset import *
@@ -6,6 +10,7 @@ from utils import *
 from datetime import datetime
 import ml_collections
 
+# [中文学习注释] 类 setting_config：封装一个模块或配置；先读初始化再读 forward/调用方法。 
 class setting_config:
     """
     the config of training setting.
@@ -20,20 +25,27 @@ class setting_config:
         'drop_path_rate': 0.2,
         'load_ckpt_path': './pre_trained_weights/vmamba_small_e238_ema.pth',
     }
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     datasets_name = 'synapse' 
     input_size_h = 224
     input_size_w = 224
     if datasets_name == 'synapse':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         data_path = './data/Synapse/train_npz/'
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         datasets = Synapse_dataset
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         list_dir = './data/Synapse/lists/lists_Synapse/'
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         volume_path = './data/Synapse/test_vol_h5/'
     else:
         raise Exception('datasets in not right!')
     
     pretrained_path = '' # if using pretrained, please enter the path of weights
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     num_classes = 9
     loss_weight = [1, 1]
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     criterion = CeDiceLoss(num_classes, loss_weight)
     z_spacing = 1
     input_channels = 3
@@ -41,12 +53,15 @@ class setting_config:
     distributed = False
     local_rank = -1
     num_workers = 0 #16
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     seed = 42
     world_size = None
     rank = None
     amp = False
 
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     batch_size = 32
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     epochs = 300
     work_dir = 'results/' + network + '_' + datasets_name + '_' + datetime.now().strftime('%A_%d_%B_%Y_%Hh_%Mm_%Ss') + '/'
     print_interval = 20
@@ -56,59 +71,78 @@ class setting_config:
     best_ckpt_path = 'PATH_TO_YOUR_BEST_CKPT'
     img_save_path = 'PATH_TO_SAVE_IMAGES'
     
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     opt = 'AdamW'
     assert opt in ['Adadelta', 'Adagrad', 'Adam', 'AdamW', 'Adamax', 'ASGD', 'RMSprop', 'Rprop', 'SGD'], 'Unsupported optimizer!'
     if opt == 'Adadelta':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.01 # default: 1.0 – coefficient that scale delta before it is applied to the parameters
         rho = 0.9 # default: 0.9 – coefficient used for computing a running average of squared gradients
         eps = 1e-6 # default: 1e-6 – term added to the denominator to improve numerical stability 
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0.05 # default: 0 – weight decay (L2 penalty) 
     elif opt == 'Adagrad':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.01 # default: 0.01 – learning rate
         lr_decay = 0 # default: 0 – learning rate decay
         eps = 1e-10 # default: 1e-10 – term added to the denominator to improve numerical stability
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0.05 # default: 0 – weight decay (L2 penalty)
     elif opt == 'Adam':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.0001 # default: 1e-3 – learning rate
         betas = (0.9, 0.999) # default: (0.9, 0.999) – coefficients used for computing running averages of gradient and its square
         eps = 1e-8 # default: 1e-8 – term added to the denominator to improve numerical stability 
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0.05 # default: 0 – weight decay (L2 penalty) 
         amsgrad = False # default: False – whether to use the AMSGrad variant of this algorithm from the paper On the Convergence of Adam and Beyond
     elif opt == 'AdamW':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.001 # default: 1e-3 – learning rate
         betas = (0.9, 0.999) # default: (0.9, 0.999) – coefficients used for computing running averages of gradient and its square
         eps = 1e-8 # default: 1e-8 – term added to the denominator to improve numerical stability
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 1e-2 # default: 1e-2 – weight decay coefficient
         amsgrad = False # default: False – whether to use the AMSGrad variant of this algorithm from the paper On the Convergence of Adam and Beyond 
     elif opt == 'Adamax':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 2e-3 # default: 2e-3 – learning rate
         betas = (0.9, 0.999) # default: (0.9, 0.999) – coefficients used for computing running averages of gradient and its square
         eps = 1e-8 # default: 1e-8 – term added to the denominator to improve numerical stability
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0 # default: 0 – weight decay (L2 penalty) 
     elif opt == 'ASGD':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.01 # default: 1e-2 – learning rate 
         lambd = 1e-4 # default: 1e-4 – decay term
         alpha = 0.75 # default: 0.75 – power for eta update
         t0 = 1e6 # default: 1e6 – point at which to start averaging
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0 # default: 0 – weight decay
     elif opt == 'RMSprop':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 1e-2 # default: 1e-2 – learning rate
         momentum = 0 # default: 0 – momentum factor
         alpha = 0.99 # default: 0.99 – smoothing constant
         eps = 1e-8 # default: 1e-8 – term added to the denominator to improve numerical stability
         centered = False # default: False – if True, compute the centered RMSProp, the gradient is normalized by an estimation of its variance
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0 # default: 0 – weight decay (L2 penalty)
     elif opt == 'Rprop':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 1e-2 # default: 1e-2 – learning rate
         etas = (0.5, 1.2) # default: (0.5, 1.2) – pair of (etaminus, etaplis), that are multiplicative increase and decrease factors
         step_sizes = (1e-6, 50) # default: (1e-6, 50) – a pair of minimal and maximal allowed step sizes 
     elif opt == 'SGD':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         lr = 0.003 # – learning rate
         momentum = 0.9 # default: 0 – momentum factor 
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         weight_decay = 0.0001 # default: 0 – weight decay (L2 penalty) 
         dampening = 0 # default: 0 – dampening for momentum
         nesterov = False # default: False – enables Nesterov momentum 
     
+    # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
     sch = 'CosineAnnealingLR'
     if sch == 'StepLR':
         step_size = epochs // 5 # – Period of learning rate decay.
@@ -122,7 +156,9 @@ class setting_config:
         gamma = 0.99 #  – Multiplicative factor of learning rate decay.
         last_epoch = -1 # – The index of last epoch. Default: -1.
     elif sch == 'CosineAnnealingLR':
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         T_max = 100 # – Maximum number of iterations. Cosine function period.
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         eta_min = 0.00001 # – Minimum learning rate. Default: 0.
         last_epoch = -1 # – The index of last epoch. Default: -1.  
     elif sch == 'ReduceLROnPlateau':
@@ -137,6 +173,7 @@ class setting_config:
     elif sch == 'CosineAnnealingWarmRestarts':
         T_0 = 50 # – Number of iterations for the first restart.
         T_mult = 2 # – A factor increases T_{i} after a restart. Default: 1.
+        # [中文学习注释] 实验配置：必须对照当前选中的数据集与分支判断是否生效。
         eta_min = 1e-6 # – Minimum learning rate. Default: 0.
         last_epoch = -1 # – The index of last epoch. Default: -1. 
     elif sch == 'WP_MultiStepLR':

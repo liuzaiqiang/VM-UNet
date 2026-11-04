@@ -1,3 +1,9 @@
+# ====== 面向医学图像分割初学者的中文源码导读（只添加注释） ======
+# 说明：Synapse 的主程序：2D CT 切片训练，3D CT 体数据逐案例评估。
+# 说明：验证间隔是 100 epoch，但 best.pth 由训练 loss 最低的 epoch 保存，而不是验证 Dice 最高。
+# 说明：原始 only_test_and_save_figs 路径读取未定义的 epoch 变量：此处仅注释，修复建议见问题审计文档。
+# 原始可执行代码和参数完全保留；复现配置及潜在错误见 docs 目录。
+# ==============================================================
 import torch
 from torch import nn
 from torch.cuda.amp import autocast, GradScaler
@@ -26,6 +32,7 @@ warnings.filterwarnings("ignore")
 
 
 
+# [学习注释] 函数 main：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
 def main(config):
 
     print('#----------Creating logger----------#')
@@ -114,6 +121,7 @@ def main(config):
 
 
     print('#----------Prepareing loss, opt, sch and amp----------#')
+    # [学习注释] 损失函数：ISIC 是 BCE+Dice，Synapse 是 CE+Dice。
     criterion = config.criterion
     optimizer = get_optimizer(config, model)
     scheduler = get_scheduler(config, optimizer)
@@ -131,6 +139,7 @@ def main(config):
 
     if config.only_test_and_save_figs:
         checkpoint = torch.load(config.best_ckpt_path, map_location=torch.device('cpu'))
+        # [学习注释] 加载模型权重：要求参数名与形状匹配。
         model.load_state_dict(checkpoint)
         config.work_dir = config.img_save_path
         if not os.path.exists(config.work_dir + 'outputs/'):
@@ -186,6 +195,7 @@ def main(config):
         )
 
         if loss < min_loss:
+            # [学习注释] 写入权重或断点：区分 best（模型权重）和 latest（训练状态）。
             torch.save(model.module.state_dict(), os.path.join(checkpoint_dir, 'best.pth'))
             min_loss = loss
             min_epoch = epoch
@@ -202,6 +212,7 @@ def main(config):
                     val_or_test=False
                 )
 
+        # [学习注释] 写入权重或断点：区分 best（模型权重）和 latest（训练状态）。
         torch.save(
             {
                 'epoch': epoch,

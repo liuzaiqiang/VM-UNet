@@ -1,3 +1,8 @@
+# ====== 面向医学图像分割初学者的中文源码导读（只添加注释） ======
+# 说明：ISIC2017/2018 的主程序入口；按配置加载图像、网络、预训练权重、优化器、学习率调度器。
+# 说明：训练过程中按验证 loss 保存 best.pth；最终 test 仍读取 val 数据，不可当作独立测试集。
+# 原始可执行代码和参数完全保留；复现配置及潜在错误见 docs 目录。
+# ==============================================================
 import torch
 from torch.utils.data import DataLoader
 import timm
@@ -17,6 +22,7 @@ warnings.filterwarnings("ignore")
 
 
 
+# [学习注释] 函数 main：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
 def main(config):
 
     print('#----------Creating logger----------#')
@@ -92,6 +98,7 @@ def main(config):
 
 
     print('#----------Prepareing loss, opt, sch and amp----------#')
+    # [学习注释] 损失函数：ISIC 是 BCE+Dice，Synapse 是 CE+Dice。
     criterion = config.criterion
     optimizer = get_optimizer(config, model)
     scheduler = get_scheduler(config, optimizer)
@@ -107,6 +114,7 @@ def main(config):
 
     if config.only_test_and_save_figs:
         checkpoint = torch.load(config.best_ckpt_path, map_location=torch.device('cpu'))
+        # [学习注释] 加载模型权重：要求参数名与形状匹配。
         model.load_state_dict(checkpoint)
         config.work_dir = config.img_save_path
         if not os.path.exists(config.work_dir + 'outputs/'):
@@ -126,6 +134,7 @@ def main(config):
     if os.path.exists(resume_model):
         print('#----------Resume Model and Other params----------#')
         checkpoint = torch.load(resume_model, map_location=torch.device('cpu'))
+        # [学习注释] 加载模型权重：要求参数名与形状匹配。
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -168,10 +177,12 @@ def main(config):
             )
 
         if loss < min_loss:
+            # [学习注释] 写入权重或断点：区分 best（模型权重）和 latest（训练状态）。
             torch.save(model.state_dict(), os.path.join(checkpoint_dir, 'best.pth'))
             min_loss = loss
             min_epoch = epoch
 
+        # [学习注释] 写入权重或断点：区分 best（模型权重）和 latest（训练状态）。
         torch.save(
             {
                 'epoch': epoch,
@@ -186,6 +197,7 @@ def main(config):
     if os.path.exists(os.path.join(checkpoint_dir, 'best.pth')):
         print('#----------Testing----------#')
         best_weight = torch.load(config.work_dir + 'checkpoints/best.pth', map_location=torch.device('cpu'))
+        # [学习注释] 加载模型权重：要求参数名与形状匹配。
         model.load_state_dict(best_weight)
         loss = test_one_epoch(
                 val_loader,

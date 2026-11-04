@@ -1,3 +1,10 @@
+# ====== 面向医学图像分割初学者的中文源码导读（只添加注释） ======
+# 说明：这是纯 SSM 医学图像分割网络的核心模块。论文 Fig.2 对应 VSS Block、编码器、解码器和最简单的相加跳连。
+# 说明：阅读顺序：PatchEmbed2D → PatchMerging2D → SS2D → VSSBlock → VSSLayer → VSSLayer_up → VSSM。
+# 说明：四维图像特征通常在 [B,C,H,W] 和 [B,H,W,C] 之间切换；SS2D 还会转换为长为 H×W 的扫描序列。
+# 说明：重点关注 A、B、C、D、dt 的状态空间含义；注意扫描方向合并与恢复原空间坐标。
+# 原始可执行代码和参数完全保留；复现配置及潜在错误见 docs 目录。
+# ==============================================================
 import time
 import math
 from functools import partial
@@ -24,6 +31,7 @@ except:
 DropPath.__repr__ = lambda self: f"timm.DropPath({self.drop_prob})"
 
 
+# [学习注释] 函数 flops_selective_scan_ref：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
 def flops_selective_scan_ref(B=1, L=256, D=768, N=16, with_D=True, with_Z=False, with_Group=True, with_complex=False):
     """
     u: r(B D L)
@@ -41,6 +49,7 @@ def flops_selective_scan_ref(B=1, L=256, D=768, N=16, with_D=True, with_Z=False,
     import numpy as np
     
     # fvcore.nn.jit_handles
+    # [学习注释] 函数 get_flops_einsum：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
     def get_flops_einsum(input_shapes, equation):
         np_arrs = [np.zeros(s) for s in input_shapes]
         optim = np.einsum_path(equation, *np_arrs, optimize="optimal")[1]
@@ -48,6 +57,7 @@ def flops_selective_scan_ref(B=1, L=256, D=768, N=16, with_D=True, with_Z=False,
             if "optimized flop" in line.lower():
                 # divided by 2 because we count MAC (multiply-add counted as one flop)
                 flop = float(np.floor(float(line.split(":")[-1]) / 2))
+                # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
                 return flop
     
 
@@ -140,9 +150,12 @@ def flops_selective_scan_ref(B=1, L=256, D=768, N=16, with_D=True, with_Z=False,
         out = out.to(dtype=dtype_in)
         """
     
+    # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
     return flops
 
 
+# [学习注释] 类 PatchEmbed2D：将图像切成非重叠 4×4 Patch 并投影为 C 通道视觉 token，降低空间分辨率；论文 III-B。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class PatchEmbed2D(nn.Module):
     r""" Image to Patch Embedding
     Args:
@@ -151,6 +164,7 @@ class PatchEmbed2D(nn.Module):
         embed_dim (int): Number of linear projection output channels. Default: 96.
         norm_layer (nn.Module, optional): Normalization layer. Default: None
     """
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None, **kwargs):
         super().__init__()
         if isinstance(patch_size, int):
@@ -161,13 +175,18 @@ class PatchEmbed2D(nn.Module):
         else:
             self.norm = None
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         x = self.proj(x).permute(0, 2, 3, 1)
         if self.norm is not None:
             x = self.norm(x)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
 
+# [学习注释] 类 PatchMerging2D：编码器下采样：将相邻空间特征拼接并线性降维，H/W 约减半、通道增加。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class PatchMerging2D(nn.Module):
     r""" Patch Merging Layer.
     Args:
@@ -176,12 +195,15 @@ class PatchMerging2D(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
     """
 
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(self, dim, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
         self.norm = norm_layer(4 * dim)
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         B, H, W, C = x.shape
 
@@ -203,15 +225,20 @@ class PatchMerging2D(nn.Module):
             x3 = x3[:, :SHAPE_FIX[0], :SHAPE_FIX[1], :]
         
         x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*C
+        # [学习注释] 张量重排：并不直接改变数值语义，但会重排维度；记录输入和输出形状。
         x = x.view(B, H//2, W//2, 4 * C)  # B H/2*W/2 4*C
 
         x = self.norm(x)
         x = self.reduction(x)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
     
 
+# [学习注释] 类 PatchExpand2D：解码器逐级恢复空间分辨率，使用线性投影和张量重排。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class PatchExpand2D(nn.Module):
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(self, dim, dim_scale=2, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim*2
@@ -219,6 +246,8 @@ class PatchExpand2D(nn.Module):
         self.expand = nn.Linear(self.dim, dim_scale*self.dim, bias=False)
         self.norm = norm_layer(self.dim // dim_scale)
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         B, H, W, C = x.shape
         x = self.expand(x)
@@ -226,10 +255,14 @@ class PatchExpand2D(nn.Module):
         x = rearrange(x, 'b h w (p1 p2 c)-> b (h p1) (w p2) c', p1=self.dim_scale, p2=self.dim_scale, c=C//self.dim_scale)
         x= self.norm(x)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
     
 
+# [学习注释] 类 Final_PatchExpand2D：分割输出前的 4 倍上采样，让预测恢复到原输入的 H×W。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class Final_PatchExpand2D(nn.Module):
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(self, dim, dim_scale=4, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
@@ -237,6 +270,8 @@ class Final_PatchExpand2D(nn.Module):
         self.expand = nn.Linear(self.dim, dim_scale*self.dim, bias=False)
         self.norm = norm_layer(self.dim // dim_scale)
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         B, H, W, C = x.shape
         x = self.expand(x)
@@ -244,10 +279,14 @@ class Final_PatchExpand2D(nn.Module):
         x = rearrange(x, 'b h w (p1 p2 c)-> b (h p1) (w p2) c', p1=self.dim_scale, p2=self.dim_scale, c=C//self.dim_scale)
         x= self.norm(x)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
 
+# [学习注释] 类 SS2D：二维选择性扫描：按水平/竖直正反方向构造序列，用输入相关的 SSM 参数捕获长距离上下文。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class SS2D(nn.Module):
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(
         self,
         d_model,
@@ -320,6 +359,7 @@ class SS2D(nn.Module):
         self.dropout = nn.Dropout(dropout) if dropout > 0. else None
 
     @staticmethod
+    # [学习注释] 函数 dt_init：初始化选择性扫描的步长 Delta 投影；正值步长影响状态衰减尺度。 
     def dt_init(dt_rank, d_inner, dt_scale=1.0, dt_init="random", dt_min=0.001, dt_max=0.1, dt_init_floor=1e-4, **factory_kwargs):
         dt_proj = nn.Linear(dt_rank, d_inner, bias=True, **factory_kwargs)
 
@@ -339,14 +379,17 @@ class SS2D(nn.Module):
         ).clamp(min=dt_init_floor)
         # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
         inv_dt = dt + torch.log(-torch.expm1(-dt))
+        # [学习注释] 验证和测试时禁用梯度，以减少显存和计算。
         with torch.no_grad():
             dt_proj.bias.copy_(inv_dt)
         # Our initialization would set all Linear.bias to zero, need to mark this one as _no_reinit
         dt_proj.bias._no_reinit = True
         
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return dt_proj
 
     @staticmethod
+    # [学习注释] 函数 A_log_init：初始化状态方程 A 的可学习对数形式，用于稳定状态演化。 
     def A_log_init(d_state, d_inner, copies=1, device=None, merge=True):
         # S4D real initialization
         A = repeat(
@@ -361,9 +404,11 @@ class SS2D(nn.Module):
                 A_log = A_log.flatten(0, 1)
         A_log = nn.Parameter(A_log)
         A_log._no_weight_decay = True
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return A_log
 
     @staticmethod
+    # [学习注释] 函数 D_init：初始化状态方程的输入直通项 D，补充线性通道。 
     def D_init(d_inner, copies=1, device=None, merge=True):
         # D "skip" parameter
         D = torch.ones(d_inner, device=device)
@@ -373,8 +418,10 @@ class SS2D(nn.Module):
                 D = D.flatten(0, 1)
         D = nn.Parameter(D)  # Keep in fp32
         D._no_weight_decay = True
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return D
 
+    # [学习注释] 函数 forward_corev0：SS2D 核心计算分支：展开多方向序列→选择性扫描→恢复并合并。 
     def forward_corev0(self, x: torch.Tensor):
         self.selective_scan = selective_scan_fn
         
@@ -412,9 +459,11 @@ class SS2D(nn.Module):
         wh_y = torch.transpose(out_y[:, 1].view(B, -1, W, H), dim0=2, dim1=3).contiguous().view(B, -1, L)
         invwh_y = torch.transpose(inv_y[:, 1].view(B, -1, W, H), dim0=2, dim1=3).contiguous().view(B, -1, L)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return out_y[:, 0], inv_y[:, 0], wh_y, invwh_y
 
     # an alternative to forward_corev1
+    # [学习注释] 函数 forward_corev1：另一套扫描核心实现；具体采用哪条路径以 forward 的赋值/调用为准。 
     def forward_corev1(self, x: torch.Tensor):
         self.selective_scan = selective_scan_fn_v1
 
@@ -451,14 +500,18 @@ class SS2D(nn.Module):
         wh_y = torch.transpose(out_y[:, 1].view(B, -1, W, H), dim0=2, dim1=3).contiguous().view(B, -1, L)
         invwh_y = torch.transpose(inv_y[:, 1].view(B, -1, W, H), dim0=2, dim1=3).contiguous().view(B, -1, L)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return out_y[:, 0], inv_y[:, 0], wh_y, invwh_y
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x: torch.Tensor, **kwargs):
         B, H, W, C = x.shape
 
         xz = self.in_proj(x)
         x, z = xz.chunk(2, dim=-1) # (b, h, w, d)
 
+        # [学习注释] 张量重排：并不直接改变数值语义，但会重排维度；记录输入和输出形状。
         x = x.permute(0, 3, 1, 2).contiguous()
         x = self.act(self.conv2d(x)) # (b, d, h, w)
         y1, y2, y3, y4 = self.forward_core(x)
@@ -470,10 +523,14 @@ class SS2D(nn.Module):
         out = self.out_proj(y)
         if self.dropout is not None:
             out = self.dropout(out)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return out
 
 
+# [学习注释] 类 VSSBlock：基础视觉状态空间残差块，融合归一化、SS2D、门控和残差连接。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class VSSBlock(nn.Module):
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(
         self,
         hidden_dim: int = 0,
@@ -488,11 +545,16 @@ class VSSBlock(nn.Module):
         self.self_attention = SS2D(d_model=hidden_dim, dropout=attn_drop_rate, d_state=d_state, **kwargs)
         self.drop_path = DropPath(drop_path)
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, input: torch.Tensor):
         x = input + self.drop_path(self.self_attention(self.ln_1(input)))
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
 
+# [学习注释] 类 VSSLayer：编码器一个尺度的 VSS Blocks 及可选下采样。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class VSSLayer(nn.Module):
     """ A basic Swin Transformer layer for one stage.
     Args:
@@ -506,6 +568,7 @@ class VSSLayer(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
     """
 
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(
         self, 
         dim, 
@@ -533,6 +596,7 @@ class VSSLayer(nn.Module):
             for i in range(depth)])
         
         if True: # is this really applied? Yes, but been overriden later in VSSM!
+            # [学习注释] 函数 _init_weights：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
             def _init_weights(module: nn.Module):
                 for name, p in module.named_parameters():
                     if name in ["out_proj.weight"]:
@@ -546,6 +610,8 @@ class VSSLayer(nn.Module):
             self.downsample = None
 
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         for blk in self.blocks:
             if self.use_checkpoint:
@@ -556,10 +622,13 @@ class VSSLayer(nn.Module):
         if self.downsample is not None:
             x = self.downsample(x)
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
     
 
 
+# [学习注释] 类 VSSLayer_up：解码器一个尺度的 VSS Blocks 及可选上采样。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class VSSLayer_up(nn.Module):
     """ A basic Swin Transformer layer for one stage.
     Args:
@@ -573,6 +642,7 @@ class VSSLayer_up(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
     """
 
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(
         self, 
         dim, 
@@ -600,6 +670,7 @@ class VSSLayer_up(nn.Module):
             for i in range(depth)])
         
         if True: # is this really applied? Yes, but been overriden later in VSSM!
+            # [学习注释] 函数 _init_weights：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
             def _init_weights(module: nn.Module):
                 for name, p in module.named_parameters():
                     if name in ["out_proj.weight"]:
@@ -613,6 +684,8 @@ class VSSLayer_up(nn.Module):
             self.upsample = None
 
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         if self.upsample is not None:
             x = self.upsample(x)
@@ -621,11 +694,15 @@ class VSSLayer_up(nn.Module):
                 x = checkpoint.checkpoint(blk, x)
             else:
                 x = blk(x)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
     
 
 
+# [学习注释] 类 VSSM：VM-UNet 主体：PatchEmbed → 编码器 → 相加跳连解码器 → 输出头，见论文 Fig.2。 
+# [学习注释] 检查要点：输入维度、可学习参数、是否下采样/上采样、残差和输出维度。
 class VSSM(nn.Module):
+    # [学习注释] 函数 __init__：构造模块并注册层/参数；实例化不等于执行 forward。 
     def __init__(self, patch_size=4, in_chans=3, num_classes=1000, depths=[2, 2, 9, 2], depths_decoder=[2, 9, 2, 2],
                  dims=[96, 192, 384, 768], dims_decoder=[768, 384, 192, 96], d_state=16, drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, patch_norm=True,
@@ -694,6 +771,7 @@ class VSSM(nn.Module):
 
         self.apply(self._init_weights)
 
+    # [学习注释] 函数 _init_weights：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
     def _init_weights(self, m: nn.Module):
         """
         out_proj.weight which is previously initilized in VSSBlock, would be cleared in nn.Linear
@@ -712,13 +790,18 @@ class VSSM(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     @torch.jit.ignore
+    # [学习注释] 函数 no_weight_decay：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
     def no_weight_decay(self):
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return {'absolute_pos_embed'}
 
     @torch.jit.ignore
+    # [学习注释] 函数 no_weight_decay_keywords：定义该模块的局部计算或辅助操作；请结合输入、调用方及输出理解其作用。 
     def no_weight_decay_keywords(self):
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return {'relative_position_bias_table'}
 
+    # [学习注释] 函数 forward_features：编码器特征提取；保存不同尺度的特征图供跳连使用。 
     def forward_features(self, x):
         skip_list = []
         x = self.patch_embed(x)
@@ -729,8 +812,10 @@ class VSSM(nn.Module):
         for layer in self.layers:
             skip_list.append(x)
             x = layer(x)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x, skip_list
     
+    # [学习注释] 函数 forward_features_up：解码器特征恢复并融合编码器的跳连特征。 
     def forward_features_up(self, x, skip_list):
         for inx, layer_up in enumerate(self.layers_up):
             if inx == 0:
@@ -738,14 +823,19 @@ class VSSM(nn.Module):
             else:
                 x = layer_up(x+skip_list[-inx])
 
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
     
+    # [学习注释] 函数 forward_final：把解码器特征进一步放大并映射为类别预测。 
     def forward_final(self, x):
         x = self.final_up(x)
+        # [学习注释] 张量重排：并不直接改变数值语义，但会重排维度；记录输入和输出形状。
         x = x.permute(0,3,1,2)
         x = self.final_conv(x)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
+    # [学习注释] 函数 forward_backbone：主干前向辅助接口，不应与完整分割 forward 混同。 
     def forward_backbone(self, x):
         x = self.patch_embed(x)
         if self.ape:
@@ -754,13 +844,17 @@ class VSSM(nn.Module):
 
         for layer in self.layers:
             x = layer(x)
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
+    # [学习注释] 函数 forward：前向传播：接受输入张量并输出特征或预测；建议逐行在纸上跟踪 B、C、H、W 变化。 
+    # [学习注释] 形状提示：常见格式是 [B,C,H,W] 或 [B,H,W,C]，遇到 permute / view / reshape 要逐项核实。
     def forward(self, x):
         x, skip_list = self.forward_features(x)
         x = self.forward_features_up(x, skip_list)
         x = self.forward_final(x)
         
+        # [学习注释] 返回值可能为 logits、概率、特征、loss 或指标；结合上游调用核实。
         return x
 
 
